@@ -29,10 +29,7 @@ class JobManager:
         self._lock = threading.Lock()
         self._engine = self._select_engine()
         self._engine_lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(
-            max_workers=1,
-            initializer=self._thread_initializer,
-        )
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     def submit(self, request: EditJobRequest) -> JobState:
         job_id = str(uuid.uuid4())
@@ -70,34 +67,39 @@ class JobManager:
         output_path = request.output_path or self._default_output_path(request.presentation_path)
 
         try:
-            with self._engine_lock:
-                self._engine.open(request.presentation_path)
-                preflight = plan_job(request, self._engine.inspect_slide(request.target.slide))
-                if not preflight.valid:
-                    raise ValueError(
-                        "Preflight validation failed: "
-                        + "; ".join(preflight.suggestions + preflight.warnings)
-                    )
-                self._engine.apply(request.target.slide, request.operations)
-                final_path = self._engine.save(output_path)
+            def _execute() -> str:
+                with self._engine_lock:
+                    self._engine.open(request.presentation_path)
+                    preflight = plan_job(request, self._engine.inspect_slide(request.target.slide))
+                    if not preflight.valid:
+                        raise ValueError(
+                            "Preflight validation failed: "
+                            + "; ".join(preflight.suggestions + preflight.warnings)
+                        )
+                    self._engine.apply(request.target.slide, request.operations)
+                    return self._engine.save(output_path)
+
+            final_path = self._run_with_com(_execute)
             self._set_status(job_id, status="completed", output_path=final_path)
         except Exception as exc:
             self._set_status(job_id, status="failed", error=str(exc))
 
     def _run_on_executor(self, fn: Callable[[], T]) -> T:
-        future = self._executor.submit(fn)
+        future = self._executor.submit(lambda: self._run_with_com(fn))
         return future.result()
 
     @staticmethod
-    def _thread_initializer() -> None:
+    def _run_with_com(fn: Callable[[], T]) -> T:
         if os.name != "nt":
-            return
-        try:
-            import pythoncom  # type: ignore
+            return fn()
 
-            pythoncom.CoInitialize()
-        except Exception:
-            return
+        import pythoncom  # type: ignore
+
+        pythoncom.CoInitialize()
+        try:
+            return fn()
+        finally:
+            pythoncom.CoUninitialize()
 
     @staticmethod
     def _default_output_path(input_path: str) -> str:

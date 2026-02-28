@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import os
 from typing import Any
 
@@ -28,6 +29,26 @@ class Win32PresentationEngine:
         self._ppt = win32.Dispatch("PowerPoint.Application")
         self._ppt.Visible = True
         self._presentation = self._ppt.Presentations.Open(os.path.abspath(presentation_path))
+
+    def inspect_slide(self, slide_number: int) -> dict[str, Any]:
+        if self._presentation is None:
+            raise RuntimeError("No presentation is open.")
+
+        slide = self._presentation.Slides(slide_number)
+        shapes: list[dict[str, Any]] = []
+        for i in range(1, slide.Shapes.Count + 1):
+            shape = slide.Shapes(i)
+            text = self._shape_text(shape)
+            shapes.append(
+                {
+                    "shape_id": shape.Id,
+                    "shape_name": shape.Name,
+                    "has_text": bool(text),
+                    "text_preview": text[:200] if text else None,
+                }
+            )
+
+        return {"slide": slide_number, "shape_count": len(shapes), "shapes": shapes}
 
     def apply(self, slide_number: int, operations: list[Operation]) -> None:
         if self._presentation is None:
@@ -67,10 +88,33 @@ class Win32PresentationEngine:
         if selector.shape_id is not None:
             return slide.Shapes(selector.shape_id)
 
+        all_shapes = [slide.Shapes(i) for i in range(1, slide.Shapes.Count + 1)]
+
         if selector.shape_name is not None:
-            for i in range(1, slide.Shapes.Count + 1):
-                shape = slide.Shapes(i)
+            for shape in all_shapes:
                 if shape.Name == selector.shape_name:
                     return shape
 
-        raise ValueError("Shape not found for selector.")
+        if selector.contains_text:
+            needle = selector.contains_text.lower()
+            for shape in all_shapes:
+                hay = (self._shape_text(shape) or "").lower()
+                if needle in hay:
+                    return shape
+
+        requested_name = selector.shape_name or ""
+        available_names = [shape.Name for shape in all_shapes]
+        suggestions = difflib.get_close_matches(requested_name, available_names, n=3, cutoff=0.3)
+        msg = "Shape not found for selector."
+        if suggestions:
+            msg += f" Did you mean one of: {', '.join(suggestions)}"
+        raise ValueError(msg)
+
+    @staticmethod
+    def _shape_text(shape: Any) -> str | None:
+        try:
+            if shape.HasTextFrame and shape.TextFrame.HasText:
+                return str(shape.TextFrame.TextRange.Text)
+        except Exception:
+            return None
+        return None

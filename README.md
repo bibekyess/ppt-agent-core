@@ -4,17 +4,33 @@ A starter project for automating Microsoft PowerPoint using Python and exposing 
 
 ## What is implemented now
 
-This repository now includes a minimal **Phase 1 vertical slice**:
+This repository includes a practical Phase-1 API with preflight validation:
 
 - Typed operation schema (`replace_text`) for agent edit requests.
 - In-memory async job manager with job states: `queued`, `running`, `completed`, `failed`.
 - FastAPI endpoints:
+  - `GET /health`
+  - `GET /presentations/inspect`
+  - `POST /jobs/plan`
   - `POST /jobs`
   - `GET /jobs/{job_id}`
-  - `GET /health`
 - Engine abstraction:
-  - Windows: `win32com` PowerPoint engine (real PPT edits)
-  - Non-Windows: mock engine that writes a JSON artifact for development/testing
+  - Windows: `win32com` PowerPoint engine (real PPT edits + slide inspection)
+  - Non-Windows: mock engine (JSON artifacts for development/testing)
+
+## Why this helps with "shape not found"
+
+Before editing, you can now inspect a slide and run planning validation:
+
+1. Inspect shapes on the target slide (names/ids/text previews).
+2. Run `/jobs/plan` using your intended operations.
+3. Submit `/jobs` only when plan returns `"valid": true`.
+
+The `shape_selector` now supports:
+
+- `shape_id`
+- exact `shape_name`
+- `contains_text` (find shape by current text content)
 
 ## Run API locally
 
@@ -22,10 +38,16 @@ This repository now includes a minimal **Phase 1 vertical slice**:
 uv run uvicorn automate_ppt.api:app --reload
 ```
 
-## Example request
+## Inspect a slide first
 
 ```bash
-curl -X POST http://127.0.0.1:8000/jobs \
+curl "http://127.0.0.1:8000/presentations/inspect?presentation_path=./samples/ppt-1.pptx&slide=2"
+```
+
+## Validate your request before executing
+
+```bash
+curl -X POST http://127.0.0.1:8000/jobs/plan \
   -H 'content-type: application/json' \
   -d '{
     "schema_version": "1.0",
@@ -41,7 +63,26 @@ curl -X POST http://127.0.0.1:8000/jobs \
   }'
 ```
 
+## Execute job
+
+```bash
+curl -X POST http://127.0.0.1:8000/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "1.0",
+    "presentation_path": "./samples/ppt-1.pptx",
+    "target": {"slide": 2},
+    "operations": [
+      {
+        "type": "replace_text",
+        "shape_selector": {"contains_text": "Old title"},
+        "value": "Updated by agent"
+      }
+    ]
+  }'
+```
+
 ## Notes
 
-- Real `.pptx` editing via `win32com` only works on Windows with Microsoft PowerPoint installed.
-- The mock engine is for API/workflow validation in non-Windows environments.
+- Real `.pptx` editing/inspection via `win32com` only works on Windows with Microsoft PowerPoint installed.
+- In non-Windows environments, inspection/editing uses mock data for workflow validation.

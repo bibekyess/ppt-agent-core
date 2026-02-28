@@ -1,17 +1,48 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from automate_ppt.job_manager import JobManager
-from automate_ppt.schemas import EditJobRequest, EditJobResponse, JobStatusResponse
+from automate_ppt.schemas import (
+    EditJobRequest,
+    EditJobResponse,
+    JobPlanResponse,
+    JobStatusResponse,
+    SlideInspectionResponse,
+)
 
-app = FastAPI(title="ppt-agent-core API", version="0.1.0")
+app = FastAPI(title="ppt-agent-core API", version="0.2.0")
 manager = JobManager()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/presentations/inspect", response_model=SlideInspectionResponse)
+def inspect_slide(
+    presentation_path: str = Query(..., description="Path to .pptx file"),
+    slide: int = Query(..., ge=1),
+) -> SlideInspectionResponse:
+    try:
+        result = manager.inspect_slide(presentation_path, slide)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SlideInspectionResponse.model_validate(result)
+
+
+@app.post("/jobs/plan", response_model=JobPlanResponse)
+def plan_job(request: EditJobRequest) -> JobPlanResponse:
+    try:
+        return manager.plan(request)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/jobs", response_model=EditJobResponse)

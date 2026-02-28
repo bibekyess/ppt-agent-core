@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class ShapeSelector(BaseModel):
     shape_id: int | None = None
     shape_name: str | None = None
+    contains_text: str | None = None
 
 
 class ReplaceTextOperation(BaseModel):
@@ -41,3 +42,18 @@ class JobStatusResponse(BaseModel):
     status: str
     error: str | None = None
     output_path: str | None = None
+
+
+class SlideInspectionResponse(BaseModel):
+    slide: int
+    shape_count: int
+    shapes: list[dict[str, Any]]
+    note: str | None = None
+
+
+class JobPlanResponse(BaseModel):
+    valid: bool
+    target_slide: int
+    available_shapes: list[str]
+    warnings: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)

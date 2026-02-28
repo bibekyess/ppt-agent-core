@@ -5,10 +5,12 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any
 
 from automate_ppt.engine.mock_engine import MockPresentationEngine
 from automate_ppt.engine.win32_engine import Win32PresentationEngine
-from automate_ppt.schemas import EditJobRequest
+from automate_ppt.planner import plan_job
+from automate_ppt.schemas import EditJobRequest, JobPlanResponse
 
 
 @dataclass
@@ -37,6 +39,18 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def inspect_slide(self, presentation_path: str, slide_number: int) -> dict[str, Any]:
+        engine = self._select_engine()
+        try:
+            engine.open(presentation_path)
+            return engine.inspect_slide(slide_number)
+        finally:
+            engine.close()
+
+    def plan(self, request: EditJobRequest) -> JobPlanResponse:
+        slide_info = self.inspect_slide(request.presentation_path, request.target.slide)
+        return plan_job(request, slide_info)
+
     def _set_status(self, job_id: str, *, status: str, error: str | None = None, output_path: str | None = None) -> None:
         with self._lock:
             state = self._jobs[job_id]
@@ -52,6 +66,12 @@ class JobManager:
 
         try:
             engine.open(request.presentation_path)
+            preflight = plan_job(request, engine.inspect_slide(request.target.slide))
+            if not preflight.valid:
+                raise ValueError(
+                    "Preflight validation failed: "
+                    + "; ".join(preflight.suggestions + preflight.warnings)
+                )
             engine.apply(request.target.slide, request.operations)
             final_path = engine.save(output_path)
             self._set_status(job_id, status="completed", output_path=final_path)

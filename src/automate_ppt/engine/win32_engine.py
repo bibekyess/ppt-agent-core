@@ -22,13 +22,25 @@ class Win32PresentationEngine:
         return win32com.client
 
     def open(self, presentation_path: str) -> None:
-        if not os.path.exists(presentation_path):
+        abs_path = os.path.abspath(presentation_path)
+        if not os.path.exists(abs_path):
             raise FileNotFoundError(f"Presentation not found: {presentation_path}")
 
         win32 = self._ensure_runtime()
-        self._ppt = win32.Dispatch("PowerPoint.Application")
+
+        try:
+            self._ppt = win32.GetActiveObject("PowerPoint.Application")
+        except Exception:
+            self._ppt = win32.Dispatch("PowerPoint.Application")
+
         self._ppt.Visible = True
-        self._presentation = self._ppt.Presentations.Open(os.path.abspath(presentation_path))
+
+        existing = self._find_open_presentation(abs_path)
+        if existing is not None:
+            self._presentation = existing
+            return
+
+        self._presentation = self._ppt.Presentations.Open(abs_path)
 
     def inspect_slide(self, slide_number: int) -> dict[str, Any]:
         if self._presentation is None:
@@ -68,12 +80,29 @@ class Win32PresentationEngine:
         return final_path
 
     def close(self) -> None:
-        if self._presentation is not None:
-            self._presentation.Close()
-            self._presentation = None
-        if self._ppt is not None:
-            self._ppt.Quit()
-            self._ppt = None
+        # Intentionally no-op: keep PowerPoint/presentation open across operations.
+        return
+
+    def _find_open_presentation(self, abs_path: str) -> Any | None:
+        if self._ppt is None:
+            return None
+
+        basename = os.path.basename(abs_path)
+        for idx in range(1, self._ppt.Presentations.Count + 1):
+            presentation = self._ppt.Presentations(idx)
+            full_name = ""
+            try:
+                full_name = os.path.abspath(str(presentation.FullName))
+            except Exception:
+                pass
+
+            if full_name and os.path.normcase(full_name) == os.path.normcase(abs_path):
+                return presentation
+
+            if str(presentation.Name) == basename:
+                return presentation
+
+        return None
 
     def _apply_operation(self, slide: Any, operation: Operation) -> None:
         if isinstance(operation, ReplaceTextOperation):

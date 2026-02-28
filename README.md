@@ -52,6 +52,13 @@ Example **planned** payload (not implemented yet):
 
 > Note: until `add_slide` is implemented in schemas/planner/engine, API requests must use currently supported operations.
 
+
+## PowerPoint session behavior
+
+- On Windows, inspect and edit operations now keep PowerPoint and the target presentation open.
+- If the file is already open in PowerPoint, the engine attaches to that open presentation and reuses it.
+- If the file is not open, the engine opens it once and keeps it open for subsequent operations.
+
 ## Why this helps with "shape not found"
 
 Before editing, you can now inspect a slide and run planning validation:

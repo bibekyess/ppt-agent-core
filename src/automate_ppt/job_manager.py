@@ -26,6 +26,8 @@ class JobManager:
         self._jobs: dict[str, JobState] = {}
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=2)
+        self._engine = self._select_engine()
+        self._engine_lock = threading.Lock()
 
     def submit(self, request: EditJobRequest) -> JobState:
         job_id = str(uuid.uuid4())
@@ -40,12 +42,9 @@ class JobManager:
             return self._jobs.get(job_id)
 
     def inspect_slide(self, presentation_path: str, slide_number: int) -> dict[str, Any]:
-        engine = self._select_engine()
-        try:
-            engine.open(presentation_path)
-            return engine.inspect_slide(slide_number)
-        finally:
-            engine.close()
+        with self._engine_lock:
+            self._engine.open(presentation_path)
+            return self._engine.inspect_slide(slide_number)
 
     def plan(self, request: EditJobRequest) -> JobPlanResponse:
         slide_info = self.inspect_slide(request.presentation_path, request.target.slide)
@@ -60,25 +59,22 @@ class JobManager:
 
     def _run_job(self, job_id: str, request: EditJobRequest) -> None:
         self._set_status(job_id, status="running")
-
-        engine = self._select_engine()
         output_path = request.output_path or self._default_output_path(request.presentation_path)
 
         try:
-            engine.open(request.presentation_path)
-            preflight = plan_job(request, engine.inspect_slide(request.target.slide))
-            if not preflight.valid:
-                raise ValueError(
-                    "Preflight validation failed: "
-                    + "; ".join(preflight.suggestions + preflight.warnings)
-                )
-            engine.apply(request.target.slide, request.operations)
-            final_path = engine.save(output_path)
+            with self._engine_lock:
+                self._engine.open(request.presentation_path)
+                preflight = plan_job(request, self._engine.inspect_slide(request.target.slide))
+                if not preflight.valid:
+                    raise ValueError(
+                        "Preflight validation failed: "
+                        + "; ".join(preflight.suggestions + preflight.warnings)
+                    )
+                self._engine.apply(request.target.slide, request.operations)
+                final_path = self._engine.save(output_path)
             self._set_status(job_id, status="completed", output_path=final_path)
         except Exception as exc:
             self._set_status(job_id, status="failed", error=str(exc))
-        finally:
-            engine.close()
 
     @staticmethod
     def _default_output_path(input_path: str) -> str:

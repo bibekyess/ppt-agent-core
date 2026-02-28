@@ -18,6 +18,40 @@ This repository includes a practical Phase-1 API with preflight validation:
   - Windows: `win32com` PowerPoint engine (real PPT edits + slide inspection)
   - Non-Windows: mock engine (JSON artifacts for development/testing)
 
+## Current supported edit operation
+
+- `replace_text`
+
+## Planned next edit operation (create slide)
+
+Creating slides via API is the next iteration. The target operation shape is:
+
+- `add_slide`
+  - create a new slide (append or at index)
+  - optional layout (`blank`, `title`, `title_and_content`)
+  - optional starter text blocks
+
+Example **planned** payload (not implemented yet):
+
+```json
+{
+  "schema_version": "1.0",
+  "presentation_path": "./samples/ppt-1.pptx",
+  "target": { "slide": 2 },
+  "operations": [
+    {
+      "type": "add_slide",
+      "position": "after_target",
+      "layout": "title_and_content",
+      "title": "New Slide from Agent",
+      "content": "Generated content goes here"
+    }
+  ]
+}
+```
+
+> Note: until `add_slide` is implemented in schemas/planner/engine, API requests must use currently supported operations.
+
 ## Why this helps with "shape not found"
 
 Before editing, you can now inspect a slide and run planning validation:
@@ -63,7 +97,7 @@ curl -X POST http://127.0.0.1:8000/jobs/plan \
   }'
 ```
 
-## Execute job
+## Execute job (replace text)
 
 ```bash
 curl -X POST http://127.0.0.1:8000/jobs \

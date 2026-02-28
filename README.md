@@ -127,3 +127,4 @@ curl -X POST http://127.0.0.1:8000/jobs \
 
 - Real `.pptx` editing/inspection via `win32com` only works on Windows with Microsoft PowerPoint installed.
 - In non-Windows environments, inspection/editing uses mock data for workflow validation.
+- If you previously saw `CoInitialize has not been called`, this is now handled by running engine calls on a COM-initialized worker thread.

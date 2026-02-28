@@ -5,12 +5,14 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from automate_ppt.engine.mock_engine import MockPresentationEngine
 from automate_ppt.engine.win32_engine import Win32PresentationEngine
 from automate_ppt.planner import plan_job
 from automate_ppt.schemas import EditJobRequest, JobPlanResponse
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -25,9 +27,12 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, JobState] = {}
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2)
         self._engine = self._select_engine()
         self._engine_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            initializer=self._thread_initializer,
+        )
 
     def submit(self, request: EditJobRequest) -> JobState:
         job_id = str(uuid.uuid4())
@@ -42,9 +47,12 @@ class JobManager:
             return self._jobs.get(job_id)
 
     def inspect_slide(self, presentation_path: str, slide_number: int) -> dict[str, Any]:
-        with self._engine_lock:
-            self._engine.open(presentation_path)
-            return self._engine.inspect_slide(slide_number)
+        def _inspect() -> dict[str, Any]:
+            with self._engine_lock:
+                self._engine.open(presentation_path)
+                return self._engine.inspect_slide(slide_number)
+
+        return self._run_on_executor(_inspect)
 
     def plan(self, request: EditJobRequest) -> JobPlanResponse:
         slide_info = self.inspect_slide(request.presentation_path, request.target.slide)
@@ -75,6 +83,21 @@ class JobManager:
             self._set_status(job_id, status="completed", output_path=final_path)
         except Exception as exc:
             self._set_status(job_id, status="failed", error=str(exc))
+
+    def _run_on_executor(self, fn: Callable[[], T]) -> T:
+        future = self._executor.submit(fn)
+        return future.result()
+
+    @staticmethod
+    def _thread_initializer() -> None:
+        if os.name != "nt":
+            return
+        try:
+            import pythoncom  # type: ignore
+
+            pythoncom.CoInitialize()
+        except Exception:
+            return
 
     @staticmethod
     def _default_output_path(input_path: str) -> str:
